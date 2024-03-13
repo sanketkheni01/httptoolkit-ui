@@ -16,6 +16,7 @@ import { buildRuleFromRequest } from '../../../model/rules/rule-creation';
 import { findItem } from '../../../model/rules/rules-structure';
 import { HtkMockRule, getRulePartKey } from '../../../model/rules/rules';
 import { WebSocketStream } from '../../../model/websockets/websocket-stream';
+import { tagsToErrorType } from '../../../model/http/error-types';
 
 import { PaneOuterContainer, PaneScrollContainer } from '../view-details-pane';
 import { StreamMessageListCard } from '../stream-message-list-card';
@@ -29,7 +30,7 @@ import { HttpAbortedResponseCard } from './http-aborted-card';
 import { HttpPerformanceCard } from './http-performance-card';
 import { HttpExportCard } from './http-export-card';
 import { SelfSizedEditor } from '../../editor/base-editor';
-import { HttpErrorHeader, tagsToErrorType } from './http-error-header';
+import { HttpErrorHeader } from './http-error-header';
 import { HttpDetailsFooter } from './http-details-footer';
 import { HttpRequestBreakpointHeader, HttpResponseBreakpointHeader } from './http-breakpoint-header';
 import { HttpBreakpointRequestCard } from './http-breakpoint-request-card';
@@ -68,6 +69,7 @@ export class HttpDetailsPane extends React.Component<{
     onDelete: (event: CollectedEvent) => void,
     onScrollToEvent: (event: CollectedEvent) => void,
     onBuildRuleFromExchange: (exchange: HttpExchange) => void,
+    onPrepareToResendRequest?: (exchange: HttpExchange) => void,
 
     // Injected:
     uiStore?: UiStore,
@@ -85,6 +87,7 @@ export class HttpDetailsPane extends React.Component<{
             onDelete,
             onScrollToEvent,
             onBuildRuleFromExchange,
+            onPrepareToResendRequest,
             uiStore,
             accountStore,
             navigate
@@ -131,6 +134,7 @@ export class HttpDetailsPane extends React.Component<{
                 onDelete={onDelete}
                 onScrollToEvent={onScrollToEvent}
                 onBuildRuleFromExchange={onBuildRuleFromExchange}
+                onPrepareToResendRequest={onPrepareToResendRequest}
                 navigate={navigate}
                 isPaidUser={isPaidUser}
             />
@@ -356,7 +360,7 @@ export class HttpDetailsPane extends React.Component<{
             ? <HttpBreakpointBodyCard
                 {...this.requestBodyParams()}
                 exchangeId={exchange.id}
-                body={requestBreakpoint.inProgressResult.body.decoded}
+                body={requestBreakpoint.inProgressResult.body}
                 rawHeaders={requestBreakpoint.inProgressResult.rawHeaders}
                 onChange={requestBreakpoint.updateBody}
             />
@@ -376,7 +380,7 @@ export class HttpDetailsPane extends React.Component<{
             ? <HttpBreakpointBodyCard
                 {...this.responseBodyParams()}
                 exchangeId={exchange.id}
-                body={responseBreakpoint.inProgressResult.body.decoded}
+                body={responseBreakpoint.inProgressResult.body}
                 rawHeaders={responseBreakpoint.inProgressResult.rawHeaders}
                 onChange={responseBreakpoint.updateBody}
             />

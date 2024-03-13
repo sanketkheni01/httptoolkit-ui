@@ -2,10 +2,10 @@ import * as _ from 'lodash';
 
 import { CollectedEvent } from '../../types';
 import { joinAnd } from '../../util/text';
-import { stringToBuffer } from '../../util';
+import { stringToBuffer } from '../../util/buffer';
 
 import { getStatusDocs } from '../http/http-docs';
-import { getReadableSize } from '../events/bodies';
+import { getReadableSize } from '../../util/buffer';
 import { EventCategories } from '../events/categorization';
 import { WebSocketStream } from '../websockets/websocket-stream';
 

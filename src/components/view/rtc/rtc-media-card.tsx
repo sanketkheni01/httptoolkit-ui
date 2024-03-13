@@ -11,7 +11,7 @@ import { ParentSize } from '@vx/responsive';
 
 import { styled } from '../../../styles';
 
-import { getReadableSize } from '../../../model/events/bodies';
+import { getReadableSize } from '../../../util/buffer';
 import { RTCMediaTrack } from '../../../model/webrtc/rtc-media-track';
 
 import {
@@ -33,7 +33,8 @@ export type RTCMediaCardProps = {
     collapsed: boolean,
     expanded: boolean,
     onExpandToggled: () => void,
-    onCollapseToggled?: () => void
+    onCollapseToggled?: () => void,
+    ariaLabel: string;
 };
 
 export const RTCMediaCard = observer((props: RTCMediaCardProps) => {

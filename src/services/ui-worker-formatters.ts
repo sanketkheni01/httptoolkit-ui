@@ -5,6 +5,9 @@ import {
 } from 'js-beautify/js/lib/beautifier';
 import * as beautifyXml from 'xml-beautifier';
 
+import { bufferToHex, bufferToString, getReadableSize } from '../util/buffer';
+import { parseRawProtobuf } from '../util/protobuf';
+
 const truncationMarker = (size: string) => `\n[-- Truncated to ${size} --]`;
 const FIVE_MB = 1024 * 1024 * 5;
 
@@ -27,10 +30,7 @@ const WorkerFormatters = {
             content = content.slice(0, FIVE_MB)
         }
 
-        const formattedContent =
-                content.toString('hex')
-                .replace(/(\w\w)/g, '$1 ')
-                .trimRight();
+        const formattedContent = bufferToHex(content);
 
         if (needsTruncation) {
             return formattedContent + truncationMarker("5MB");
@@ -72,5 +72,25 @@ const WorkerFormatters = {
         return beautifyCss(content.toString('utf8'), {
             indent_size: 2
         });
+    },
+    protobuf: (content: Buffer) => {
+        const data = parseRawProtobuf(content, {
+            prefix: ''
+        });
+
+        return JSON.stringify(data, (_key, value) => {
+            // Buffers have toJSON defined, so arrive here in JSONified form:
+            if (value.type === 'Buffer' && Array.isArray(value.data)) {
+                const buffer = Buffer.from(value.data);
+
+                return {
+                    "Type": `Buffer (${getReadableSize(buffer)})`,
+                    "As string": bufferToString(buffer, 'detect-encoding'),
+                    "As hex": bufferToHex(buffer)
+                }
+            } else {
+                return value;
+            }
+        }, 2);
     }
 } as const;

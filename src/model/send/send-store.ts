@@ -57,9 +57,8 @@ export class SendStore {
     requestInputs: RequestInput[] = [];
 
     @action.bound
-    addRequestInput(): RequestInput {
-        const requestInput = new RequestInput();
-        this.requestInputs.push(requestInput);
+    addRequestInput(requestInput = new RequestInput()): RequestInput {
+        this.requestInputs[0] = requestInput;
         return requestInput;
     }
 
@@ -88,11 +87,13 @@ export class SendStore {
             lookupOptions: passthroughOptions.lookupOptions
         };
 
+        const encodedBody = await requestInput.rawBody.encodingBestEffortPromise;
+
         const responseStream = await ServerApi.sendRequest({
             url: requestInput.url,
             method: requestInput.method,
             headers: requestInput.headers,
-            rawBody: await requestInput.rawBody.encoded
+            rawBody: encodedBody
         }, requestOptions);
 
         const exchange = this.eventStore.recordSentRequest({
@@ -105,20 +106,22 @@ export class SendStore {
             hostname: url.hostname,
             headers: rawHeadersToHeaders(requestInput.headers),
             rawHeaders: requestInput.headers,
-            body: { buffer: await requestInput.rawBody.encoded },
-            timingEvents: {} as TimingEvents,
+            body: { buffer: encodedBody },
+            timingEvents: {
+                startTime: Date.now()
+            } as TimingEvents,
             tags: ['httptoolkit:manually-sent-request']
         });
 
         // Keep the exchange up to date as response data arrives:
         trackResponseEvents(responseStream, exchange)
-        .catch(action((error: ErrorLike) => {
+        .catch(action((error: ErrorLike & { timingEvents?: TimingEvents }) => {
             exchange.markAborted({
                 id: exchange.id,
                 error: error,
                 timingEvents: {
                     ...exchange.timingEvents as TimingEvents,
-                    abortedTimestamp: performance.now()
+                    ...error.timingEvents
                 },
                 tags: error.code ? [`passthrough-error:${error.code}`] : []
             });
@@ -151,7 +154,6 @@ const trackResponseEvents = flow(function * (
         const messageType = value.type;
         switch (messageType) {
             case 'request-start':
-                timingEvents.startTime = Date.now();
                 timingEvents.startTimestamp = value.timestamp;
                 timingEvents.bodyReceivedTimestamp = value.timestamp;
                 break;
@@ -181,9 +183,17 @@ const trackResponseEvents = flow(function * (
                 break;
             case 'error':
                 if (value.error.message) {
-                    throw new Error(value.error.message + (
-                        value.error.code ? ` (${value.error.code})` : ''
-                    ));
+                    timingEvents.startTimestamp ??= value.timestamp; // If request not yet started
+                    timingEvents.abortedTimestamp = value.timestamp;
+
+                    throw Object.assign(
+                        new Error(value.error.message + (
+                            value.error.code ? ` (${value.error.code})` : ''
+                        )), {
+                            code: value.error.code,
+                            timingEvents
+                        }
+                    );
                 } else {
                     logError(`Unknown response error for sent request: ${
                         JSON.stringify(value.error)

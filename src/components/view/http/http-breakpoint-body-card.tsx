@@ -8,17 +8,22 @@ import {
     isProbablyUtf8,
     bufferToString,
     stringToBuffer
-} from '../../../util';
+} from '../../../util/buffer';
 import { getHeaderValue } from '../../../util/headers';
 import {
     EditableContentType,
     EditableContentTypes,
     getEditableContentType
 } from '../../../model/events/content-types';
+import { EditableBody } from '../../../model/http/editable-body';
 
 import { CollapsibleCard, ExpandableCardProps } from '../../common/card';
 import { SelfSizedEditor } from '../../editor/base-editor';
-import { EditableBodyCardHeader, EditorCardContent } from '../../editor/body-card-components';
+import {
+    BodyCodingErrorBanner,
+    EditableBodyCardHeader,
+    EditorCardContent
+} from '../../editor/body-card-components';
 
 @observer
 export class HttpBreakpointBodyCard extends React.Component<ExpandableCardProps & {
@@ -26,7 +31,7 @@ export class HttpBreakpointBodyCard extends React.Component<ExpandableCardProps 
     direction: 'left' | 'right',
 
     exchangeId: string,
-    body: Buffer,
+    body: EditableBody,
     rawHeaders: RawHeaders,
     onChange: (result: Buffer) => void,
     editorNode: portals.HtmlPortalNode<typeof SelfSizedEditor>;
@@ -56,7 +61,7 @@ export class HttpBreakpointBodyCard extends React.Component<ExpandableCardProps 
     private get textEncoding() {
         // If we're handling text data, we want to show & edit it as UTF8.
         // If it's binary, that's a lossy operation, so we use binary (latin1) instead.
-        return isProbablyUtf8(this.props.body)
+        return isProbablyUtf8(this.props.body.decoded)
             ? 'utf8'
             : 'binary';
     }
@@ -64,18 +69,21 @@ export class HttpBreakpointBodyCard extends React.Component<ExpandableCardProps 
     render() {
         const {
             body,
+            rawHeaders,
             title,
             exchangeId,
             direction,
             collapsed,
             expanded,
             onCollapseToggled,
-            onExpandToggled
+            onExpandToggled,
+            ariaLabel
         } = this.props;
 
-        const bodyString = bufferToString(body, this.textEncoding);
+        const bodyString = bufferToString(body.decoded, this.textEncoding);
 
         return <CollapsibleCard
+            ariaLabel={ariaLabel}
             direction={direction}
             collapsed={collapsed}
             onCollapseToggled={onCollapseToggled}
@@ -96,6 +104,16 @@ export class HttpBreakpointBodyCard extends React.Component<ExpandableCardProps 
                     onChangeContentType={this.onChangeContentType}
                 />
             </header>
+
+            {
+                body.latestEncodingResult.state === 'rejected'
+                && <BodyCodingErrorBanner
+                    error={body.latestEncodingResult.value as Error}
+                    headers={rawHeaders}
+                    type='encoding'
+                />
+            }
+
             <EditorCardContent>
                 <portals.OutPortal<typeof SelfSizedEditor>
                     contentId={`bp-${exchangeId}-${direction}`}

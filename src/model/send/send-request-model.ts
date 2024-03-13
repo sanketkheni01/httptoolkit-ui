@@ -2,9 +2,10 @@ import * as Mockttp from 'mockttp';
 import * as serializr from 'serializr';
 import { observable } from 'mobx';
 
-import { RawHeaders } from "../../types";
-import { EditableContentType } from "../events/content-types";
+import { HttpExchange, RawHeaders } from "../../types";
+import { EditableContentType, getEditableContentTypeFromViewable } from "../events/content-types";
 import { EditableBody } from '../http/editable-body';
+import { syncBodyToContentLength, syncFormattingToContentType, syncUrlToHeaders } from '../http/editable-request-parts';
 
 // This is our model of a Request for sending. Smilar to the API model,
 // but not identical, as we add extra UI metadata etc.
@@ -23,32 +24,79 @@ export class RequestInput {
     public requestContentType: EditableContentType = 'text';
 
     @observable
-    public rawBody: EditableBody = new EditableBody(
-        Buffer.from([]),
-        undefined,
-        () => this.headers
-    )
+    public rawBody: EditableBody;
+
+    constructor(
+        existingData?: {
+            method: string,
+            url: string,
+            headers: RawHeaders,
+            requestContentType: EditableContentType,
+            rawBody: Buffer
+        }
+    ) {
+        // When deserializing, we need to ensure the body is provided directly
+        // in the constructor, before model syncing is initialized.
+        if (existingData) {
+            this.method = existingData.method;
+            this.url = existingData.url;
+            this.headers = existingData.headers;
+            this.requestContentType = existingData.requestContentType;
+            this.rawBody = new EditableBody(
+                existingData.rawBody,
+                undefined,
+                () => this.headers
+            );
+        } else {
+            this.rawBody = new EditableBody(
+                Buffer.from([]),
+                undefined,
+                () => this.headers
+            );
+        }
+
+        syncUrlToHeaders(() => this.url, () => this.headers);
+        syncBodyToContentLength(this.rawBody, () => this.headers);
+        syncFormattingToContentType(
+            () => this.headers,
+            () => this.requestContentType,
+            (contentType) => { this.requestContentType = contentType }
+        );
+    }
 
 }
 
 export const requestInputSchema = serializr.createModelSchema(RequestInput, {
     method: serializr.primitive(),
     url: serializr.primitive(),
-    headers: serializr.raw(),
+    headers: serializr.list(serializr.list(serializr.primitive())),
     requestContentType: serializr.primitive(),
 
     rawBody: serializr.custom(
         (body: EditableBody) => body.decoded.toString('base64'),
-        (base64Data, context) => {
-            const requestInput = context.target;
-            return new EditableBody(
-                Buffer.from(base64Data, 'base64'),
-                undefined,
-                () => requestInput.headers
-            );
-        }
+        () => serializr.SKIP // Handled manually in the factory below
     )
+}, (context) => {
+    const data = context.json;
+    const bodyData = Buffer.from(data.rawBody, 'base64');
+    return new RequestInput({
+        ...data,
+        rawBody: bodyData
+    });
 });
+
+export async function buildRequestInputFromExchange(exchange: HttpExchange): Promise<RequestInput> {
+    const body = await exchange.request.body.decodedPromise ??
+        Buffer.from('!!! ORIGINAL REQUEST BODY COULD NOT BE DECODED !!!');
+
+    return new RequestInput({
+        method: exchange.request.method,
+        url: exchange.request.url,
+        headers: exchange.request.rawHeaders,
+        requestContentType: getEditableContentTypeFromViewable(exchange.request.contentType) ?? 'text',
+        rawBody: body,
+    });
+}
 
 // These are the types that the sever client API expects. They are _not_ the same as
 // the Input type above, which is more flexible and includes various UI concerns that

@@ -5,7 +5,7 @@ import { disposeOnUnmount, observer } from 'mobx-react';
 import * as portals from 'react-reverse-portal';
 
 import { styled, warningColor } from '../../styles';
-import { asBuffer, bufferToString } from '../../util';
+import { asBuffer, bufferToString } from '../../util/buffer';
 import { ArrowIcon } from '../../icons';
 
 import {
@@ -13,7 +13,7 @@ import {
     getCompatibleTypes,
     getContentEditorName
 } from '../../model/events/content-types';
-import { getReadableSize } from '../../model/events/bodies';
+import { getReadableSize } from '../../util/buffer';
 import { StreamMessage } from '../../model/events/stream-message';
 
 import { ContentLabel, ContentMonoValue } from '../common/text-content';
@@ -222,8 +222,10 @@ export class StreamMessageEditorRow extends React.Component<MessageEditorRowProp
             undefined,
             asBuffer(message.content)
         );
-        const contentType = _.includes(compatibleContentTypes, this.selectedContentType) ?
-            this.selectedContentType! : message.contentType;
+
+        const contentType = _.includes(compatibleContentTypes, this.selectedContentType)
+            ? this.selectedContentType!
+            : message.contentType;
 
         const messageDirection = message.direction === 'sent' ? 'left' : 'right';
 
