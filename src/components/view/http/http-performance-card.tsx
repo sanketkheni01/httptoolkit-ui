@@ -4,17 +4,15 @@ import { observer, inject } from 'mobx-react';
 import { get } from 'typesafe-get';
 
 import { styled } from '../../../styles';
-import {
-    HttpExchange,
-    TimingEvents,
-    ExchangeMessage
-} from '../../../types';
+import { HttpExchange, ExchangeMessage } from '../../../types';
+
+import { getReadableSize } from '../../../util/buffer';
 import { asHeaderArray } from '../../../util/headers';
 import { joinAnd } from '../../../util/text';
 import { Icon, WarningIcon, SuggestionIcon } from '../../../icons';
 
 import { AccountStore } from '../../../model/account/account-store';
-import { getReadableSize, testEncodings } from '../../../model/events/bodies';
+import { testEncodings } from '../../../model/events/bodies';
 import {
     explainCacheability,
     explainCacheLifetime,

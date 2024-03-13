@@ -264,6 +264,7 @@ const HiddenMatchers = [
     'default-ws-wildcard',
     'multipart-form-data',
     'raw-body-regexp',
+    'regex-url',
     'hostname',
     'port',
     'protocol',
@@ -462,3 +463,9 @@ export const isWebSocketRule = matchRule(matchRuleType('websocket'));
 export const isRTCRule = matchRule(matchRuleType('webrtc'));
 
 export const isStepPoweredRule = isRTCRule;
+
+export enum RulePriority {
+    FALLBACK = 0,
+    DEFAULT = 1,
+    OVERRIDE = 2
+}

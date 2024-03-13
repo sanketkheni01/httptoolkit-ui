@@ -1,5 +1,9 @@
 import * as _ from 'lodash';
 import { MessageBody } from '../../types';
+import {
+    isProbablyProtobuf,
+    isValidProtobuf
+} from '../../util/protobuf';
 
 // Simplify a mime type as much as we can, without throwing any errors
 export const getBaseContentType = (mimeType: string | undefined) => {
@@ -28,7 +32,8 @@ export type ViewableContentType =
     | 'javascript'
     | 'markdown'
     | 'yaml'
-    | 'image';
+    | 'image'
+    | 'protobuf';
 
 export const EditableContentTypes = [
     'text',
@@ -84,6 +89,12 @@ const mimeTypeToContentTypeMap: { [mimeType: string]: ViewableContentType } = {
     'text/html': 'html',
     'application/xhtml': 'html',
 
+    'application/protobuf': 'protobuf',
+    'application/x-protobuf': 'protobuf',
+    'application/vnd.google.protobuf': 'protobuf',
+    'application/x-google-protobuf': 'protobuf',
+    'application/proto': 'protobuf',
+
     'application/octet-stream': 'raw'
 } as const;
 
@@ -92,18 +103,22 @@ export function getContentType(mimeType: string | undefined): ViewableContentTyp
     return mimeTypeToContentTypeMap[baseContentType!];
 }
 
+export function getEditableContentTypeFromViewable(contentType: ViewableContentType): EditableContentType | undefined {
+    if (EditableContentTypes.includes(contentType as any)) {
+        return contentType as EditableContentType;
+    }
+}
+
 export function getEditableContentType(mimeType: string | undefined): EditableContentType | undefined {
     const baseContentType = getBaseContentType(mimeType);
     const viewableContentType = mimeTypeToContentTypeMap[baseContentType!];
-
-    if (EditableContentTypes.includes(viewableContentType as any)) {
-        return viewableContentType as EditableContentType;
-    }
+    return getEditableContentTypeFromViewable(viewableContentType);
 }
 
 export function getContentEditorName(contentType: ViewableContentType): string {
     return contentType === 'raw' ? 'Hex'
         : contentType === 'json' ? 'JSON'
+        : contentType === 'css' ? 'CSS'
         : contentType === 'url-encoded' ? 'URL-Encoded'
         : _.capitalize(contentType);
 }
@@ -144,6 +159,17 @@ export function getCompatibleTypes(
     // Allow optionally formatting non-XML as XML, if it looks like it might be
     if (firstChar === '<') {
         types.add('xml');
+    }
+
+    if (
+        body &&
+        isProbablyProtobuf(body) &&
+        !types.has('protobuf') &&
+        // If it's probably unmarked protobuf, and it's a manageable size, try
+        // parsing it just to check:
+        (body.length < 100_000 && isValidProtobuf(body))
+    ) {
+        types.add('protobuf');
     }
 
     // SVGs can always be shown as XML

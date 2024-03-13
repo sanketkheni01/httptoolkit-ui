@@ -2,36 +2,22 @@ import * as React from "react";
 import { inject, observer } from "mobx-react";
 import * as portals from 'react-reverse-portal';
 
-import { css, styled } from '../../styles';
 import { HttpExchange } from "../../types";
+import { logError } from "../../errors";
 
 import { UiStore } from '../../model/ui/ui-store';
 import { AccountStore } from '../../model/account/account-store';
-import { SuccessfulExchange } from "../../model/http/exchange";
+import { CompletedExchange, SuccessfulExchange } from "../../model/http/exchange";
+import { RequestInput } from "../../model/send/send-request-model";
+import { tagsToErrorType } from "../../model/http/error-types";
 
 import { ContainerSizedEditor } from '../editor/base-editor';
-import { LoadingCard } from '../common/loading-card';
-import { HttpAbortedResponseCard } from '../view/http/http-aborted-card';
 
-import { ResponseStatusSection } from './sent-response-status';
-import { SentResponseHeaderSection } from './sent-response-headers';
+import { SendCardContainer } from './send-card-section';
+import { FailedResponseStatusSection, PendingResponseStatusSection, ResponseStatusSection } from './sent-response-status';
+import { PendingResponseHeaderSection, SentResponseHeaderSection } from './sent-response-headers';
 import { SentResponseBodyCard } from './sent-response-body';
-
-const ResponsePaneContainer = styled.section<{
-    hasExpandedChild: boolean
-}>`
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-
-    ${p => p.hasExpandedChild && css`
-        > * {
-            /* CollapsibleCard applies its own display property to override this for the expanded card */
-            display: none;
-        }
-    `}
-`;
-
+import { SentResponseError } from './sent-response-error';
 @inject('uiStore')
 @inject('accountStore')
 @observer
@@ -39,6 +25,7 @@ export class ResponsePane extends React.Component<{
     uiStore?: UiStore,
     accountStore?: AccountStore,
 
+    requestInput: RequestInput,
     exchange: HttpExchange | undefined,
     editorNode: portals.HtmlPortalNode<typeof ContainerSizedEditor>
 }> {
@@ -51,15 +38,17 @@ export class ResponsePane extends React.Component<{
         const { exchange, uiStore } = this.props;
         if (!exchange) return null;
 
-        return <ResponsePaneContainer hasExpandedChild={!!uiStore?.expandedSentResponseCard}>
+        return <SendCardContainer
+            hasExpandedChild={!!uiStore?.expandedSentResponseCard}
+        >
             {
                 exchange.isSuccessfulExchange()
                     ? this.renderSuccessfulResponse(exchange)
                 : exchange.isCompletedExchange()
-                    ? this.renderAbortedResponse(exchange)
+                    ? this.renderFailedResponse(exchange)
                 : this.renderInProgressResponse()
             }
-        </ResponsePaneContainer>;
+        </SendCardContainer>;
     }
 
     renderSuccessfulResponse(exchange: SuccessfulExchange) {
@@ -87,19 +76,47 @@ export class ResponsePane extends React.Component<{
 
     }
 
-    renderAbortedResponse(exchange: HttpExchange) {
-        return <HttpAbortedResponseCard
-            cardProps={this.cardProps.responseHeaders}
-            exchange={exchange}
-        />;
+    renderFailedResponse(exchange: CompletedExchange) {
+        const { uiStore } = this.props;
+
+        const errorType = tagsToErrorType(exchange.tags);
+
+        if (!errorType) {
+            logError(`Sent response failed with no error tags: ${
+                JSON.stringify(exchange.tags)
+            } (${exchange.abortMessage})`);
+        }
+
+        return <>
+            <FailedResponseStatusSection
+                exchange={exchange}
+                errorType={errorType ?? 'unknown'}
+                theme={uiStore!.theme}
+            />
+            <SentResponseError
+                errorType={errorType ?? 'unknown'}
+                errorMessage={exchange.abortMessage}
+            />
+        </>;
     }
 
     renderInProgressResponse() {
-        return <LoadingCard {...this.cardProps.responseHeaders}>
-            <header>
-                <h1>Response...</h1>
-            </header>
-        </LoadingCard>;
+        const { uiStore, editorNode, requestInput } = this.props;
+
+        return <>
+            <PendingResponseStatusSection
+                theme={uiStore!.theme}
+            />
+            <PendingResponseHeaderSection
+                {...this.cardProps.responseHeaders}
+            />
+            <SentResponseBodyCard
+                {...this.cardProps.responseBody}
+                isPaidUser={this.props.accountStore!.isPaidUser}
+                url={requestInput.url}
+                editorNode={editorNode}
+            />
+        </>
     }
 
 }
