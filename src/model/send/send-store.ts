@@ -10,62 +10,141 @@ import {
 } from 'mockttp';
 
 import { logError } from '../../errors';
-import { lazyObservablePromise } from '../../util/observable';
+import { getObservableDeferred, lazyObservablePromise } from '../../util/observable';
 import { persist, hydrate } from '../../util/mobx-persist/persist';
 import { ErrorLike, UnreachableCheck } from '../../util/error';
 import { rawHeadersToHeaders } from '../../util/headers';
+import { trackEvent } from '../../metrics';
 
 import { EventsStore } from '../events/events-store';
 import { RulesStore } from '../rules/rules-store';
+import { AccountStore } from '../account/account-store';
 import * as ServerApi from '../../services/server-api';
 
 import { HttpExchange } from '../http/exchange';
 import { ResponseHeadEvent, ResponseStreamEvent } from './send-response-model';
 import {
+    buildRequestInputFromExchange,
     ClientProxyConfig,
     RequestInput,
-    requestInputSchema,
-    RULE_PARAM_REF_KEY
+    SendRequest,
+    RULE_PARAM_REF_KEY,
+    sendRequestSchema
 } from './send-request-model';
 
 export class SendStore {
 
     constructor(
+        private accountStore: AccountStore,
         private eventStore: EventsStore,
         private rulesStore: RulesStore
     ) {}
 
     readonly initialized = lazyObservablePromise(async () => {
         await Promise.all([
+            this.accountStore.initialized,
             this.eventStore.initialized,
             this.rulesStore.initialized
         ]);
 
-        await hydrate({
-            key: 'send-store',
-            store: this
-        });
+        if (this.accountStore.mightBePaidUser) {
+            // For Pro users only, your 'Send' content persists on reload
+            await hydrate({
+                key: 'send-store',
+                store: this
+            });
+        }
 
-        autorun(() => {
-            if (this.requestInputs.length === 0) this.addRequestInput();
-        })
+        if (this.sendRequests.length === 0) this.addRequestInput();
+        this.selectedRequest = this.sendRequests[this.sendRequests.length - 1];
 
         console.log('Send store initialized');
     });
 
-    @persist('list', requestInputSchema) @observable
-    requestInputs: RequestInput[] = [];
+    @persist('list', sendRequestSchema) @observable
+    sendRequests: Array<SendRequest> = [];
+
+    @observable
+    selectedRequest!: SendRequest;
 
     @action.bound
     addRequestInput(requestInput = new RequestInput()): RequestInput {
-        this.requestInputs[0] = requestInput;
+        const newSendRequest = observable({
+            id: uuid(),
+            request: requestInput,
+            sentExchange: undefined
+        });
+
+        this.sendRequests.push(newSendRequest);
+        this.selectedRequest = newSendRequest;
+
         return requestInput;
     }
 
-    @observable
-    sentExchange: HttpExchange | undefined;
+    async addRequestInputFromExchange(exchange: HttpExchange) {
+        trackEvent({ category: 'Send', action: 'Resend exchange' });
 
-    readonly sendRequest = async (requestInput: RequestInput) => {
+        this.addRequestInput(
+            await buildRequestInputFromExchange(exchange)
+        );
+    }
+
+    @action.bound
+    selectRequest(sendRequest: SendRequest) {
+        this.selectedRequest = sendRequest;
+    }
+
+    @action.bound
+    moveSelection(distance: number) {
+        const currentIndex = this.sendRequests.indexOf(this.selectedRequest);
+        if (currentIndex === -1) throw new Error("Selected request is somehow not in Send requests list");
+
+        const newIndex = _.clamp(currentIndex + distance, 0, this.sendRequests.length - 1);
+        this.selectRequest(this.sendRequests[newIndex]);
+    }
+
+    @action.bound
+    deleteRequest(sendRequest: SendRequest) {
+        const index = this.sendRequests.indexOf(sendRequest);
+        if (index === -1) throw new Error('Attempt to delete non-existent Send request');
+
+        if (this.sendRequests.length === 1) {
+            // Special case: if you close the only tab, you get a new empty tab
+            this.addRequestInput(); // Add new fresh tab
+            this.sendRequests.shift(); // Drop existing tab
+            return;
+        }
+
+        // Otherwise >1 tab: drop the closed tab and select an appropriate replacement
+        if (this.selectedRequest == sendRequest) {
+            const indexToSelect = (this.sendRequests.length > index + 1)
+                ? index + 1
+                : index - 1;
+
+            this.selectRequest(this.sendRequests[indexToSelect]);
+        }
+
+        this.sendRequests.splice(index, 1);
+    }
+
+    readonly sendRequest = async (sendRequest: SendRequest) => {
+        trackEvent({ category: 'Send', action: 'Sent request' });
+
+        const requestInput = sendRequest.request;
+        const pendingRequestDeferred = getObservableDeferred();
+        const abortController = new AbortController();
+        runInAction(() => {
+            sendRequest.sentExchange = undefined;
+
+            sendRequest.pendingSend = {
+                promise: pendingRequestDeferred.promise,
+                abort: () => abortController.abort()
+            };
+
+            const clearPending = action(() => { sendRequest.pendingSend = undefined; });
+            sendRequest.pendingSend.promise.then(clearPending, clearPending);
+        });
+
         const exchangeId = uuid();
 
         const passthroughOptions = this.rulesStore.activePassthroughOptions;
@@ -89,12 +168,16 @@ export class SendStore {
 
         const encodedBody = await requestInput.rawBody.encodingBestEffortPromise;
 
-        const responseStream = await ServerApi.sendRequest({
-            url: requestInput.url,
-            method: requestInput.method,
-            headers: requestInput.headers,
-            rawBody: encodedBody
-        }, requestOptions);
+        const responseStream = await ServerApi.sendRequest(
+            {
+                url: requestInput.url,
+                method: requestInput.method,
+                headers: requestInput.headers,
+                rawBody: encodedBody
+            },
+            requestOptions,
+            abortController.signal
+        );
 
         const exchange = this.eventStore.recordSentRequest({
             id: exchangeId,
@@ -105,7 +188,7 @@ export class SendStore {
             path: url.pathname,
             hostname: url.hostname,
             headers: rawHeadersToHeaders(requestInput.headers),
-            rawHeaders: requestInput.headers,
+            rawHeaders: _.cloneDeep(requestInput.headers),
             body: { buffer: encodedBody },
             timingEvents: {
                 startTime: Date.now()
@@ -116,19 +199,42 @@ export class SendStore {
         // Keep the exchange up to date as response data arrives:
         trackResponseEvents(responseStream, exchange)
         .catch(action((error: ErrorLike & { timingEvents?: TimingEvents }) => {
-            exchange.markAborted({
-                id: exchange.id,
-                error: error,
-                timingEvents: {
-                    ...exchange.timingEvents as TimingEvents,
-                    ...error.timingEvents
-                },
-                tags: error.code ? [`passthrough-error:${error.code}`] : []
-            });
-        }));
+            if (error.name === 'AbortError' && abortController.signal.aborted) {
+                const startTime = exchange.timingEvents.startTime!; // Always set in Send case (just above)
+                // Make a guess at an aborted timestamp, since this error won't give us one automatically:
+                const durationBeforeAbort = Date.now() - startTime;
+                const startTimestamp = exchange.timingEvents.startTimestamp ?? startTime;
+                const abortedTimestamp = startTimestamp + durationBeforeAbort;
+
+                exchange.markAborted({
+                    id: exchange.id,
+                    error: {
+                        message: 'Request cancelled'
+                    },
+                    timingEvents: {
+                        startTimestamp,
+                        abortedTimestamp,
+                        ...exchange.timingEvents,
+                        ...error.timingEvents
+                    } as TimingEvents,
+                    tags: ['client-error:ECONNABORTED']
+                });
+            } else {
+                exchange.markAborted({
+                    id: exchange.id,
+                    error: error,
+                    timingEvents: {
+                        ...exchange.timingEvents as TimingEvents,
+                        ...error.timingEvents
+                    },
+                    tags: error.code ? [`passthrough-error:${error.code}`] : []
+                });
+            }
+        }))
+        .then(() => pendingRequestDeferred.resolve());
 
         runInAction(() => {
-            this.sentExchange = exchange;
+            sendRequest.sentExchange = exchange;
         });
     }
 

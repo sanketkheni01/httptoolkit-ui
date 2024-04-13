@@ -24,10 +24,13 @@ import { SentResponseError } from './sent-response-error';
 export class ResponsePane extends React.Component<{
     uiStore?: UiStore,
     accountStore?: AccountStore,
+    editorNode: portals.HtmlPortalNode<typeof ContainerSizedEditor>,
 
     requestInput: RequestInput,
     exchange: HttpExchange | undefined,
-    editorNode: portals.HtmlPortalNode<typeof ContainerSizedEditor>
+
+    abortRequest?: () => void,
+    showRequestOnViewPage?: () => void
 }> {
 
     get cardProps() {
@@ -52,12 +55,13 @@ export class ResponsePane extends React.Component<{
     }
 
     renderSuccessfulResponse(exchange: SuccessfulExchange) {
-        const { uiStore, editorNode } = this.props;
+        const { uiStore, editorNode, showRequestOnViewPage } = this.props;
         const response = exchange.response;
 
         return <>
             <ResponseStatusSection
                 exchange={exchange}
+                showRequestOnViewPage={showRequestOnViewPage}
                 theme={uiStore!.theme}
             />
             <SentResponseHeaderSection
@@ -77,7 +81,7 @@ export class ResponsePane extends React.Component<{
     }
 
     renderFailedResponse(exchange: CompletedExchange) {
-        const { uiStore } = this.props;
+        const { uiStore, showRequestOnViewPage } = this.props;
 
         const errorType = tagsToErrorType(exchange.tags);
 
@@ -91,6 +95,7 @@ export class ResponsePane extends React.Component<{
             <FailedResponseStatusSection
                 exchange={exchange}
                 errorType={errorType ?? 'unknown'}
+                showRequestOnViewPage={showRequestOnViewPage}
                 theme={uiStore!.theme}
             />
             <SentResponseError
@@ -101,10 +106,18 @@ export class ResponsePane extends React.Component<{
     }
 
     renderInProgressResponse() {
-        const { uiStore, editorNode, requestInput } = this.props;
+        const {
+            uiStore,
+            editorNode,
+            requestInput,
+            exchange,
+            abortRequest
+        } = this.props;
 
         return <>
             <PendingResponseStatusSection
+                timingEvents={exchange?.timingEvents}
+                abortRequest={abortRequest}
                 theme={uiStore!.theme}
             />
             <PendingResponseHeaderSection

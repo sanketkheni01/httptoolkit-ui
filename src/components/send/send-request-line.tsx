@@ -4,8 +4,10 @@ import { Method } from 'mockttp';
 import { styled } from '../../styles';
 import { Icon, ArrowIcon } from '../../icons';
 
-import { Button, Select, TextInput } from '../common/inputs';
 import { getMethodColor } from '../../model/events/categorization';
+
+import { Ctrl } from '../../util/ui';
+import { Button, Select, TextInput } from '../common/inputs';
 
 type MethodName = keyof typeof Method;
 const validMethods = Object.values(Method)
@@ -63,9 +65,15 @@ const MethodSelectContainer = styled.div`
     flex-grow: 0;
     flex-basis: 105px;
 
-    &:focus-within > svg {
-        color: ${p => p.theme.popColor};
-        opacity: 1;
+    &:focus-within {
+        > svg {
+            color: ${p => p.theme.popColor};
+            opacity: 1;
+        }
+
+        > select {
+            font-weight: bold;
+        }
     }
 `;
 
@@ -93,6 +101,11 @@ const SendButton = styled(Button)`
 
     > svg {
         padding: 0;
+    }
+
+    &:focus {
+        outline: none;
+        background-color: ${p => p.theme.popColor};
     }
 `;
 
@@ -152,6 +165,7 @@ export const SendRequestLine = (props: {
             type='url'
             spellCheck='false'
             placeholder='https://example.com/hello?name=world'
+            required={true}
 
             value={props.url}
             onFocus={prepopulateUrl}
@@ -160,7 +174,7 @@ export const SendRequestLine = (props: {
         <SendButton
             type='submit'
             disabled={props.isSending}
-            title='Send this request'
+            title={`Send this request (${Ctrl}+Enter)`}
         >
             { props.isSending
                 ? <Icon spin fixedWidth={true} icon={['fas', 'spinner']} />

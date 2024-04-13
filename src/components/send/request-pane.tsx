@@ -12,6 +12,7 @@ import { RequestInput } from '../../model/send/send-request-model';
 import { EditableContentType } from '../../model/events/content-types';
 
 import { ContainerSizedEditor } from '../editor/base-editor';
+import { useHotkeys } from '../../util/ui';
 
 import { SendCardContainer } from './send-card-section';
 import { SendRequestLine } from './send-request-line';
@@ -33,7 +34,17 @@ const METHODS_WITHOUT_BODY = [
     'GET',
     'HEAD',
     'OPTIONS'
-]
+];
+
+const RequestPaneKeyboardShortcuts = (props: {
+    sendRequest: () => void
+}) => {
+    useHotkeys('Ctrl+Enter, Cmd+Enter', (event) => {
+        props.sendRequest()
+    }, [props.sendRequest]);
+
+    return null;
+};
 
 @inject('rulesStore')
 @inject('uiStore')
@@ -45,7 +56,8 @@ export class RequestPane extends React.Component<{
     editorNode: portals.HtmlPortalNode<typeof ContainerSizedEditor>,
 
     requestInput: RequestInput,
-    sendRequest: (requestInput: RequestInput) => void
+    sendRequest: () => void,
+    isSending: boolean
 }> {
 
     get cardProps() {
@@ -70,18 +82,28 @@ export class RequestPane extends React.Component<{
     }
 
     render() {
-        const { requestInput, editorNode, uiStore } = this.props;
+        const {
+            requestInput,
+            sendRequest,
+            isSending,
+            editorNode,
+            uiStore
+        } = this.props;
 
         return <SendCardContainer
             hasExpandedChild={!!uiStore?.expandedSendRequestCard}
         >
+            <RequestPaneKeyboardShortcuts
+                sendRequest={sendRequest}
+            />
+
             <SendRequestLine
                 method={requestInput.method}
                 updateMethod={this.updateMethod}
                 url={requestInput.url}
                 updateUrl={this.updateUrl}
-                isSending={this.isSending}
-                sendRequest={this.sendRequest}
+                isSending={isSending}
+                sendRequest={sendRequest}
             />
             <SendRequestHeadersCard
                 {...this.cardProps.requestHeaders}
@@ -127,22 +149,5 @@ export class RequestPane extends React.Component<{
         const { requestInput } = this.props;
         requestInput.rawBody.updateDecodedBody(input);
     }
-
-    @observable
-    private isSending = false;
-
-    sendRequest = flow(function * (this: RequestPane) {
-        if (this.isSending) return;
-
-        this.isSending = true;
-
-        try {
-            yield this.props.sendRequest(this.props.requestInput);
-        } catch (e) {
-            console.warn('Sending request failed', e);
-        } finally {
-            this.isSending = false;
-        }
-    }).bind(this);
 
 }
